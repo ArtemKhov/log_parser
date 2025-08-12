@@ -2,6 +2,7 @@ import argparse
 import json
 from collections import defaultdict
 from datetime import datetime
+from typing import List, Dict
 
 from tabulate import tabulate
 
@@ -26,7 +27,7 @@ def parse_args():
     return args
 
 
-def read_logs(file_paths, date_filter=None):
+def read_logs(file_paths: List[str], date_filter=None) -> List:
     """Читает и парсит лог-файлы"""
 
     logs = []
@@ -48,7 +49,7 @@ def read_logs(file_paths, date_filter=None):
     return logs
 
 
-def generate_average_report(logs):
+def generate_average_report(logs: List[Dict]) -> List[Dict]:
     endpoint_stats = defaultdict(lambda: {'count': 0, 'total_time': 0.0})
 
     for log in logs:
@@ -70,7 +71,7 @@ def generate_average_report(logs):
     return sorted(report, key=lambda x: -x['request_count'])
 
 
-def generate_user_agents_report(logs):
+def generate_user_agents_report(logs: List[Dict]) -> List[Dict]:
     ua_stats = defaultdict(int)
 
     for log in logs:
@@ -81,7 +82,7 @@ def generate_user_agents_report(logs):
     return [{'user_agent': k, 'count': v} for k, v in sorted(ua_stats.items(), key=lambda x: -x[1])]
 
 
-def print_report(report_data, report_type):
+def print_report(report_data: List[Dict], report_type: str) -> None:
     """Выводит отчет в виде таблицы"""
 
     if not report_data:
@@ -110,7 +111,7 @@ def print_report(report_data, report_type):
         print(f"Ошибка при выводе отчета: {str(e)}")
 
 
-def main():
+def main() -> None:
     """Парсинг аргументов, обработка логов, генерация и вывод отчетов"""
     args = parse_args()
 
