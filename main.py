@@ -9,7 +9,7 @@ from tabulate import tabulate
 def parse_args():
     parser = argparse.ArgumentParser(description='Обработка лог-файлов и формирование отчетов')
     parser.add_argument('--file', nargs='+', required=True, help='Путь до лог-файла')
-    parser.add_argument('--report', choices=['average'], required=True, help='Тип отчета')
+    parser.add_argument('--report', choices=['average', 'user_agents'], required=True, help='Тип отчета')
     parser.add_argument('--date', help='Фильтрация лога по дате (YYYY-MM-DD)')
     return parser.parse_args()
 
@@ -52,13 +52,31 @@ def generate_average_report(logs):
     return sorted(report, key=lambda x: -x['request_count'])
 
 
-def print_report(report_data):
-    headers = ['№', 'endpoint', 'request_count', 'average_response_time']
-    table_data = [
-        [i+1, item['endpoint'], item['request_count'], item['average_response_time']]
-        for i, item in enumerate(report_data)
-    ]
-    print(tabulate(table_data, headers=headers))
+def generate_user_agents_report(logs):
+    ua_stats = defaultdict(int)
+
+    for log in logs:
+        ua = log.get('http_user_agent', 'Unknown')
+        ua_stats[ua] += 1
+
+    return [{'user_agent': k, 'count': v} for k, v in sorted(ua_stats.items(), key=lambda x: -x[1])]
+
+
+def print_report(report_data, report_type):
+    if report_type == 'average':
+        headers = ['№', 'endpoint', 'request_count', 'average_response_time']
+        table_data = [
+            [i+1, item['endpoint'], item['request_count'], item['average_response_time']]
+            for i, item in enumerate(report_data)
+        ]
+        print(tabulate(table_data, headers=headers))
+    elif report_type == 'user_agents':
+        headers = ['№', 'user_agent', 'count']
+        table_data = [
+            [i + 1, item['user_agent'], item['count']]
+            for i, item in enumerate(report_data)
+        ]
+        print(tabulate(table_data, headers=headers))
 
 
 def main():
@@ -76,7 +94,10 @@ def main():
 
     if args.report == 'average':
         report = generate_average_report(logs)
-        print_report(report)
+        print_report(report, args.report)
+    elif args.report == 'user_agents':
+        report = generate_user_agents_report(logs)
+        print_report(report, args.report)
 
 
 if __name__ == '__main__':
