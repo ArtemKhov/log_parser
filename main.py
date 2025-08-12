@@ -79,7 +79,7 @@ def print_report(report_data, report_type):
 
     try:
         if report_type == 'average':
-            headers = ['№', 'Endpoint', 'Request Count', 'Avg Time']
+            headers = ['№', 'endpoint', 'request_count', 'avg_time']
             table_data = [
                 [i + 1, item.get('endpoint', 'N/A'),
                  item.get('request_count', 0),
@@ -87,7 +87,7 @@ def print_report(report_data, report_type):
                 for i, item in enumerate(report_data)
             ]
         else:
-            headers = ['№', 'User Agent', 'Count']
+            headers = ['№', 'user_agent', 'count']
             table_data = [
                 [i + 1, item.get('user_agent', 'Unknown'),
                  item.get('count', 0)]
