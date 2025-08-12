@@ -7,6 +7,8 @@ from tabulate import tabulate
 
 
 def parse_args():
+    """Парсит аргументы командной строки"""
+
     parser = argparse.ArgumentParser(description='Обработка лог-файлов и формирование отчетов')
     parser.add_argument('--file', nargs='+', required=True, help='Путь до лог-файла(ов)')
     parser.add_argument('--report', choices=['average', 'user_agents'], required=True, help='Тип отчета')
@@ -25,18 +27,23 @@ def parse_args():
 
 
 def read_logs(file_paths, date_filter=None):
+    """Читает и парсит лог-файлы"""
+
     logs = []
     for file_path in file_paths:
         with open(file_path, 'r') as file:
             for line in file:
                 try:
                     log_entry = json.loads(line.strip())
+
+                    # Фильтрация по дате если указана
                     if date_filter:
                         log_date = datetime.fromisoformat(log_entry['@timestamp']).date()
                         if log_date != date_filter:
                             continue
                     logs.append(log_entry)
                 except (json.JSONDecodeError, KeyError):
+                    # Пропускаем записи с невалидным JSON или без обязательных полей
                     continue
     return logs
 
@@ -59,6 +66,7 @@ def generate_average_report(logs):
             'average_response_time': round(average_time, 3)
         })
 
+    # Сортировка по убыванию количества запросов
     return sorted(report, key=lambda x: -x['request_count'])
 
 
@@ -69,10 +77,13 @@ def generate_user_agents_report(logs):
         ua = log.get('http_user_agent', 'Unknown')
         ua_stats[ua] += 1
 
+    # Сортируем по убыванию количества запросов
     return [{'user_agent': k, 'count': v} for k, v in sorted(ua_stats.items(), key=lambda x: -x[1])]
 
 
 def print_report(report_data, report_type):
+    """Выводит отчет в виде таблицы"""
+
     if not report_data:
         print("Нет данных для отображения")
         return
@@ -100,6 +111,7 @@ def print_report(report_data, report_type):
 
 
 def main():
+    """Парсинг аргументов, обработка логов, генерация и вывод отчетов"""
     args = parse_args()
 
     date_filter = None
@@ -110,8 +122,10 @@ def main():
             print("Неправильный формат даты. Ожидается: YYYY-MM-DD")
             return
 
+    # Чтение и фильтрация логов
     logs = read_logs(args.file, date_filter)
 
+    # Генерация и вывод запрошенного отчета
     if args.report == 'average':
         report = generate_average_report(logs)
         print_report(report, args.report)
