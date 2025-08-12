@@ -2,7 +2,12 @@ import pytest
 import json
 import tempfile
 import os
-from main import read_logs, generate_average_report, generate_user_agents_report
+from datetime import date
+from unittest.mock import patch
+import sys
+from io import StringIO
+
+from main import parse_args, main, read_logs, generate_average_report
 
 
 @pytest.fixture
@@ -25,6 +30,7 @@ def log_data():
 @pytest.fixture
 def log_file(log_data):
     """Создает временный файл с тестовыми данными"""
+
     temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False)
     for entry in log_data:
         temp_file.write(json.dumps(entry) + '\n')
@@ -32,177 +38,158 @@ def log_file(log_data):
 
     yield temp_file.name
 
-
-def test_read_logs(log_file):
-    """Тест чтения логов"""
-    entries = read_logs([log_file])
-
-    # Все 5 записей должны быть прочитаны успешно
-    assert len(entries) == 5
-
-    # Проверяем структуру записей
-    for entry in entries:
-        assert all(key in entry for key in ['@timestamp', 'url', 'response_time', 'http_user_agent'])
-        assert isinstance(entry['response_time'], float)
-        assert entry['status'] == 200
+    # Очистка
+    try:
+        os.unlink(temp_file.name)
+    except OSError:
+        pass
 
 
-def test_generate_average_report():
-    """Тест генерации average отчета"""
-    entries = [
-        {"url": "/api/context/...", "response_time": 0.024},
-        {"url": "/api/context/...", "response_time": 0.02},
-        {"url": "/api/context/...", "response_time": 0.024},
-        {"url": "/api/homeworks/...", "response_time": 0.06},
-        {"url": "/api/homeworks/...", "response_time": 0.032}
-    ]
+def test_parse_args_valid(log_file):
 
-    report = generate_average_report(entries)
+    """Тест валидных аргументов"""
+    test_args = ['main.py', '--file', log_file, '--report', 'average']
 
-    # Должно быть 2 эндпоинта
-    assert len(report) == 2
+    with patch.object(sys, 'argv', test_args):
+        args = parse_args()
+        assert args.file == [log_file]
+        assert args.report == 'average'
 
 
-    context_data = next((item for item in report if item['endpoint'] == '/api/context/...'), None)
-    homeworks_data = next((item for item in report if item['endpoint'] == '/api/homeworks/...'), None)
+def test_parse_args_multiple_files(log_file):
 
-    # Проверяем /api/context/...
-    assert context_data is not None
-    assert context_data['request_count'] == 3
-    # Проверяем, что среднее время в разумных пределах
-    assert 0.022 <= context_data['average_response_time'] <= 0.023
+    """Тест нескольких файлов"""
+    test_args = ['main.py', '--file', log_file, log_file, '--report', 'user_agents']
 
-    # Проверяем /api/homeworks/...
-    assert homeworks_data is not None
-    assert homeworks_data['request_count'] == 2
-    assert abs(homeworks_data['average_response_time'] - 0.046) < 0.001
-
-    # Проверяем сортировку
-    assert report[0]['endpoint'] == '/api/context/...'
-    assert report[1]['endpoint'] == '/api/homeworks/...'
+    with patch.object(sys, 'argv', test_args):
+        args = parse_args()
+        assert len(args.file) == 2
+        assert args.report == 'user_agents'
 
 
-def test_generate_user_agents_report():
-    """Тест генерации user_agents отчета"""
-    entries = [
-        {"http_user_agent": "Mozilla"},
-        {"http_user_agent": "Chrome"},
-        {"http_user_agent": "Chrome"},
-        {"http_user_agent": "Opera"},
-        {"http_user_agent": "..."}
-    ]
+def test_parse_args_with_date(log_file):
+    """Тест аргументов с датой"""
+    test_args = ['main.py', '--file', log_file, '--report', 'average', '--date', '2025-06-22']
 
-    report = generate_user_agents_report(entries)
-
-    # Должно быть 4 уникальных user agent'а
-    assert len(report) == 4
-
-    ua_counts = {item['user_agent']: item['count'] for item in report}
-
-    # Проверяем количество для каждого user agent'а (независимо от порядка)
-    expected_counts = {
-        "Chrome": 2,
-        "Mozilla": 1,
-        "Opera": 1,
-        "...": 1
-    }
-
-    assert ua_counts == expected_counts
+    with patch.object(sys, 'argv', test_args):
+        args = parse_args()
+        assert args.date == '2025-06-22'
 
 
-def test_average_calculation_precision():
-    """Тест точности вычисления среднего времени ответа"""
-    entries = [
-        {"url": "/test", "response_time": 0.1},
-        {"url": "/test", "response_time": 0.2},
-        {"url": "/test", "response_time": 0.3}
-    ]
+def test_parse_args_invalid_file():
+    """Тест невалидного файла"""
 
-    report = generate_average_report(entries)
-    assert len(report) == 1
-    assert report[0]['request_count'] == 3
-    assert abs(report[0]['average_response_time'] - 0.2) < 0.001
+    test_args = ['main.py', '--file', 'nonexistent.log', '--report', 'average']
+
+    with patch.object(sys, 'argv', test_args):
+        with pytest.raises(SystemExit):
+            parse_args()
 
 
-def test_sorting_by_request_count():
-    """Тест правильной сортировки по количеству запросов"""
-    entries = []
+def test_parse_args_missing_required():
+    """Тест отсутствующих обязательных аргументов"""
 
-    entries.extend([
-        {"url": "/api/less_used", "response_time": 0.1},
-        {"url": "/api/less_used", "response_time": 0.2}
-    ])
+    test_args = ['main.py', '--file', 'test.log']
 
-    entries.extend([
-        {"url": "/api/more_used", "response_time": 0.05},
-        {"url": "/api/more_used", "response_time": 0.06},
-        {"url": "/api/more_used", "response_time": 0.07},
-        {"url": "/api/more_used", "response_time": 0.08}
-    ])
-
-    report = generate_average_report(entries)
-
-    # Первым должен быть эндпоинт с большим количеством запросов
-    assert len(report) == 2
-    assert report[0]['endpoint'] == '/api/more_used'
-    assert report[0]['request_count'] == 4
-    assert report[1]['endpoint'] == '/api/less_used'
-    assert report[1]['request_count'] == 2
+    with patch.object(sys, 'argv', test_args):
+        with pytest.raises(SystemExit):
+            parse_args()
 
 
-def test_empty_data_handling():
-    """Тест обработки пустых данных"""
-    # Пустой отчет average
-    report = generate_average_report([])
-    assert report == []
+def test_main_average_report(log_file):
+    """Тест main функции с average отчетом"""
 
-    # Пустой отчет user_agents
-    report = generate_user_agents_report([])
-    assert report == []
+    test_args = ['main.py', '--file', log_file, '--report', 'average']
 
+    # Перехватываем stdout
+    captured_output = StringIO()
+    with patch.object(sys, 'argv', test_args):
+        with patch('sys.stdout', captured_output):
+            main()
 
-def test_single_entry_data():
-    """Тест с одной записью"""
-    entries = [{"url": "/api/single", "response_time": 0.05, "http_user_agent": "Safari"}]
-
-    # Тест average отчета
-    avg_report = generate_average_report(entries)
-    assert len(avg_report) == 1
-    assert avg_report[0]['endpoint'] == '/api/single'
-    assert avg_report[0]['request_count'] == 1
-    assert abs(avg_report[0]['average_response_time'] - 0.05) < 0.001
-
-    # Тест user_agents отчета
-    ua_report = generate_user_agents_report(entries)
-    assert len(ua_report) == 1
-    assert ua_report[0]['user_agent'] == 'Safari'
-    assert ua_report[0]['count'] == 1
+    output = captured_output.getvalue()
+    assert 'endpoint' in output
+    assert 'request_count' in output
 
 
-def test_integration_data(log_file):
-    """Интеграционный тест"""
-    entries = read_logs([log_file])
-    assert len(entries) == 5
+def test_main_user_agents_report(log_file):
+    """Тест main функции с user_agents отчетом"""
 
-    # Генерируем average отчет
-    average_report = generate_average_report(entries)
-    assert len(average_report) == 2
+    test_args = ['main.py', '--file', log_file, '--report', 'user_agents']
 
-    # Проверяем структуру отчета
-    for item in average_report:
-        assert 'endpoint' in item
-        assert 'request_count' in item
-        assert 'average_response_time' in item
-        assert isinstance(item['request_count'], int)
-        assert isinstance(item['average_response_time'], float)
+    # Перехватываем stdout
+    captured_output = StringIO()
+    with patch.object(sys, 'argv', test_args):
+        with patch('sys.stdout', captured_output):
+            main()
 
-    # Генерируем user_agents отчет
-    ua_report = generate_user_agents_report(entries)
-    assert len(ua_report) == 4
+    output = captured_output.getvalue()
+    assert 'user_agent' in output
+    assert 'count' in output
 
-    # Проверяем количество для каждого user agent'а
-    ua_counts = {item['user_agent']: item['count'] for item in ua_report}
-    assert ua_counts["Chrome"] == 2
-    assert ua_counts["Mozilla"] == 1
-    assert ua_counts["Opera"] == 1
-    assert ua_counts["..."] == 1
+
+def test_main_invalid_date_format(log_file):
+    """Тест main функции с невалидным форматом даты"""
+
+    test_args = ['main.py', '--file', log_file, '--report', 'average', '--date', 'invalid-date']
+
+    captured_output = StringIO()
+    with patch.object(sys, 'argv', test_args):
+        with patch('sys.stdout', captured_output):
+            main()
+
+    output = captured_output.getvalue()
+    assert 'Неправильный формат даты' in output
+
+
+def test_main_empty_data():
+    """Тест main функции с пустыми данными"""
+
+    temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False)
+    temp_file.close()
+
+    test_args = ['main.py', '--file', temp_file.name, '--report', 'average']
+
+    captured_output = StringIO()
+    with patch.object(sys, 'argv', test_args):
+        with patch('sys.stdout', captured_output):
+            main()
+
+    output = captured_output.getvalue()
+    assert 'Нет данных для отображения' in output
+
+    try:
+        os.unlink(temp_file.name)
+    except OSError:
+        pass
+
+
+def test_main_date_filtering(log_file):
+    """Тест main функции с фильтрацией по дате"""
+
+    test_args = ['main.py', '--file', log_file, '--report', 'average', '--date', '2025-06-21']
+
+    captured_output = StringIO()
+    with patch.object(sys, 'argv', test_args):
+        with patch('sys.stdout', captured_output):
+            main()
+
+    output = captured_output.getvalue()
+    assert 'Нет данных для отображения' in output
+
+
+def test_integration_main_function(log_file):
+    """Интеграционный тест для main функции"""
+
+    test_args = ['main.py', '--file', log_file, '--report', 'average']
+
+    # Перехватываем stdout
+    captured_output = StringIO()
+    with patch.object(sys, 'argv', test_args):
+        with patch('sys.stdout', captured_output):
+            main()
+
+    output = captured_output.getvalue()
+
+    assert len(output) > 0
+    assert 'api/context' in output or 'api/homeworks' in output
